@@ -1,8 +1,13 @@
 # mu-smarterliving
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+**Smart meter API client and Home Assistant integration for Manx Utilities (Isle of Man) electricity monitoring — a zero-dependency Python CLI for the Hildebrand / Glowmarkt platform behind SmarterLiving.** Query half-hourly consumption (kWh) and cost data from your IoM smart meter, run a lightweight local JSON bridge, and surface live energy sensors in [Home Assistant](https://www.home-assistant.io/) — no custom components, no MQTT, no pip installs.
+
+Stdlib only — one file. Works with any utility running Hildebrand's Glowmarkt white-label platform.
+
 Zero-dependency Python CLI + HTTP bridge for the **Manx Utilities SmarterLiving** smart-meter platform (Hildebrand/Glowmarkt backend). Query your electricity consumption and cost, or run a tiny JSON server that Home Assistant can poll natively.
 
-Stdlib only — no pip installs, one file.
 
 ## The API (reverse-engineered)
 
