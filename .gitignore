@@ -1,0 +1,6 @@
+.env
+data/
+dump/
+apk/
+__pycache__/
+*.pyc
