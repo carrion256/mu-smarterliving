@@ -121,10 +121,6 @@ def list_ve():
     return authed_get("virtualentity")
 
 
-def ve_resources(ve_id):
-    return authed_get(f"virtualentity/{ve_id}/resources")
-
-
 def all_resources():
     out = []
     for ve in list_ve():
@@ -152,7 +148,11 @@ def _readings_bucket(rid, frm, to, period="P1D", function="sum"):
 
 
 def _day_totals(rid):
-    """today (accumulating), yesterday, last7, mtd sums."""
+    """today (accumulating), yesterday, last7, mtd sums.
+
+    ponytail: day buckets are UTC because the upstream API returns UTC day
+    boundaries; IoM local-day edges would need an offset-shifted second query.
+    """
     import datetime as dt
     now = time.gmtime()
     today_mid = dt.datetime(now.tm_year, now.tm_mon, now.tm_mday, tzinfo=dt.timezone.utc)
