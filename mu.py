@@ -18,6 +18,7 @@ import argparse
 import json
 import os
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -255,9 +256,84 @@ def main():
 
 # ---------- serve mode (stdlib http.server, no deps) ----------
 
+
+# ---------- serve-side cache (stale-while-revalidate) ----------
+
+class _Cache:
+    """Cache with background refresh: always serves the last good value
+    instantly; a daemon thread keeps it fresh. Upstream latency (6-12s per
+    summary) is the reason this exists — callers must never block on it."""
+
+    def __init__(self, ttl=180):
+        self.ttl = ttl
+        self.data = None
+        self.updated = 0
+        self._thread = None
+
+    def get(self):
+        if self.data is None:
+            self.refresh()
+        elif time.time() - self.updated > self.ttl:
+            self.start_refresher()  # idempotent; refresh runs in background
+        return self.data
+
+    def refresh(self):
+        data = _last_hour_payload() if self is _last_hour_cache else summary()
+        if data is not None:
+            self.data = data
+            self.updated = time.time()
+        return self.data
+
+    def start_refresher(self):
+        if self._thread is None:
+            self._thread = threading.Thread(target=self._refresh_loop, daemon=True)
+            self._thread.start()
+
+    def _refresh_loop(self):
+        while True:
+            try:
+                self.refresh()
+            except Exception:
+                pass  # keep serving stale data on upstream failure
+            time.sleep(self.ttl)
+
+
+def _last_hour_payload():
+    """kWh + pence over the trailing 60 min from half-hourly totals."""
+    to_s = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime())
+    from_s = time.strftime("%Y-%m-%dT%H:%M:%S",
+                           time.gmtime(time.time() - 3600))
+    kwh = pence = None
+    for r in all_resources():
+        rid = r["resourceId"]
+        try:
+            cur = current(rid)
+        except (ApiError, ConnectionError):
+            continue
+        cls = cur.get("classifier") or ""
+        if cls not in ("electricity.consumption", "electricity.consumption.cost"):
+            continue
+        try:
+            d = readings(rid, from_s, to_s, "PT30M", "sum")
+        except (ApiError, ConnectionError):
+            continue
+        vals = [p[1] for p in (d.get("data") or []) if len(p) > 1 and p[1] is not None]
+        if vals and kwh is None and cls == "electricity.consumption":
+            kwh = round(sum(vals), 3)
+        elif vals and pence is None and cls == "electricity.consumption.cost":
+            pence = round(sum(vals), 2)
+    return {"kwh": kwh, "pence": pence, "updated": int(time.time())}
+
+
+_summary_cache = None
+_last_hour_cache = _Cache(ttl=120)
+
+
 def serve(port, bind):
     import http.server
     import socketserver
+    global _summary_cache
+    _summary_cache = _summary_cache or _Cache()
 
     class Handler(http.server.BaseHTTPRequestHandler):
         def _send(self, code, payload):
@@ -273,8 +349,10 @@ def serve(port, bind):
             try:
                 if path == "health":
                     return self._send(200, {"ok": True})
+                if path == "last_hour":
+                    return self._send(200, _last_hour_cache.get() or {"kwh": None, "pence": None})
                 if path == "summary":
-                    return self._send(200, summary())
+                    return self._send(200, _summary_cache.get())
                 if path.startswith("current/"):
                     return self._send(200, current(path.split("/", 1)[1]))
                 if path.startswith("readings/"):
